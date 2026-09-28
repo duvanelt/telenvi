@@ -1450,7 +1450,7 @@ def clip_many(targets, nRes=None):
 
     return targets
 
-def get_zonal_stats_sample(target_raster, target_zone, valid_threshold=None, operator='>', deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], maskValue=0):
+def get_zonal_stats_sample(target_raster, target_zone, valid_threshold=None, operator='>', deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], maskValue=0, mode=None):
     """
     Return min, first decile, first quantile, median, third quantile, ninth decile, max of the raster pixels within the target_zone
     Qs can be arranged to set up the returned values differently
@@ -1460,7 +1460,7 @@ def get_zonal_stats_sample(target_raster, target_zone, valid_threshold=None, ope
     target_raster_cropped = Open(cropFromVector(target_raster, target_zone.geometry), load_pixels=True)
 
     # Now we set to maskValue the pixels outside of the zone
-    target_raster_masked = target_raster_cropped.maskFromVector_v2(target_zone, maskValue=maskValue)
+    target_raster_masked = target_raster_cropped.maskFromVector_v2(target_zone, maskValue=maskValue, mode=mode)
 
     # Now, we flatten the array to make easier the use of the mask
     target_array_masked_flatten = target_raster_masked.array.flatten()
@@ -1565,6 +1565,17 @@ def binary_geoims_get_part_of_geo_row_with_ones(geo_row, target_geoim, epsg=2056
     ratio = n_ones / n_pixels_in_geo_row
 
     return ratio
+
+def get_values_masked_by_binary_raster(target, binary_raster):
+    """
+    Return a flat array with the pixels where the binary_raster == 1
+    """
+    target_ar = target.array.copy()
+    mask_ar = binary_raster.array
+    target_ar = np.where(mask_ar == 1, target_ar, np.nan)
+    target_ar_fla = target_ar.flatten()
+    target_ar_fla = target_ar_fla[~np.isnan(target_ar_fla)]
+    return target_ar_fla
 
 
 #TODO if __name__ == "__main__":

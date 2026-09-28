@@ -176,9 +176,6 @@ def get_array(input_target):
 
     return output_array, input_is_geoim
 
-import numpy as np
-from sklearn import cluster
-
 def get_clusters_kmeans_with_mask(
     *ys,
     df=None,
@@ -705,6 +702,7 @@ def explore_linear_relation(
     xbound=None,
     ybound=None,
     show_score=True,
+    get_score=True,
     show_legend=True,
     mad_lines_color=None,
     x_units=None,
@@ -816,7 +814,11 @@ def explore_linear_relation(
         if ybound is not None:
             ax.set_ybound(ybound)
 
-        return ax, model, df_out
+        if get_score:
+            r2_val = r2_score(y_true, y_pred)
+            return ax, model, df_out, r2_val
+        else:
+            return ax, model, df_out
 
     return model, df_out
 
@@ -904,7 +906,6 @@ def plot_mad_lines(x, y_true, y_pred, ax, mad_lines_color, default_color):
     mad /= len(x)
     print(f"MAD: {mad:.4f}")
 
-
 def add_scores_text(x, y_true, y_pred, ax, scores_text_color):
     r2_val = r2_score(y_true, y_pred)
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
@@ -916,6 +917,7 @@ def add_scores_text(x, y_true, y_pred, ax, scores_text_color):
         color=scores_text_color,
         bbox=dict(boxstyle='round', facecolor='white', alpha=0.7)
     )
+    return r2_val
 
 
 def get_anova(df, hue, y, equal_var=True, nan_policy='raise'):
@@ -1202,7 +1204,6 @@ def add_groups_legend(ax, target_df, column, show_counts=True, legend_fontsize=8
 
     return ax
 
-
 def get_ridges(r_dem, l_canny=1, h_canny=2, ock_asp=50, ock_cur=10, ock_ridges=3, cur_thresh=0.2):
     """
     Detect ridges lines from dem sing aspect / canny / cuvature 
@@ -1213,8 +1214,6 @@ def get_ridges(r_dem, l_canny=1, h_canny=2, ock_asp=50, ock_cur=10, ock_ridges=3
     r_cdp = rt.getCardinalArrayFromAspect(r_asp)
 
     # Canny edge detection pour trouver les zones où l'orientation des pentes change
-    l=2
-    h=l+1
     r_cdp_im = geo_monoband_to_pil(r_cdp)
     r_cdp_canny = canny(r_cdp_im, l_canny, h_canny)
     geo_r_cdp_canny = mono_im_to_geo_mono(r_cdp_canny, r_cdp)
@@ -1253,3 +1252,64 @@ def get_mean_alti_ridges(r_dem, ridges, target_geoserie = None, decile=0.75):
     if len(alti_ridges) == 0:
         return np.nan
     return np.quantile(alti_ridges, decile)
+
+def count_class_occurrences_per_group(
+    layer,
+    label_field,
+    class_field,
+    classes_to_avoid=None,
+    prefix="n",
+):
+    """
+    Count the occurrences of each class within each group.
+
+    Parameters
+    ----------
+    layer : geopandas.GeoDataFrame
+        Input GeoDataFrame containing group labels and class labels.
+
+    label_field : str
+        Name of the field containing the group labels.
+
+    class_field : str
+        Name of the field containing the classes to count.
+
+    classes_to_avoid : str or iterable, optional
+        Class or classes to exclude from the counting.
+
+    prefix : str, default="n"
+        Prefix used to build the output column names.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per group and one column per class. Column names follow the
+        pattern ``{prefix}_{class_name}``.
+    """
+
+    if classes_to_avoid is not None:
+        if isinstance(classes_to_avoid, str):
+            classes_to_avoid = [classes_to_avoid]
+
+        layer = layer[~layer[class_field].isin(classes_to_avoid)]
+
+    return (
+        layer.groupby([label_field, class_field])
+        .size()
+        .unstack(fill_value=0)
+        .add_prefix(f"{prefix}")
+        .reset_index()
+    )
+
+
+def affect_random_color_to_labels(df, label_col='label', color_col='label_color'):
+    """
+    Affect a color to each label of df 
+    """
+    unique_labels = df[label_col].unique()
+    hex_chars = '0123456789ABCDEF'
+    # Générer une couleur hexadécimale de 6 caractères par label
+    colors = ['#' + ''.join(np.random.choice(list(hex_chars), 6)) for _ in unique_labels]
+    color_map = dict(zip(unique_labels, colors))
+    df[color_col] = df[label_col].map(color_map)
+    return df

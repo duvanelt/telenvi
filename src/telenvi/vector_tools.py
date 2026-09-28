@@ -686,7 +686,7 @@ def rasterize(gdf, pixel_size=10, burn_value=1, out_dtype=gdal.GDT_Byte, load_pi
 
     # Rasterize with the field
     if type(burn_value) == str:
-        gdal.RasterizeLayer(mem_raster, [1], layer, options=[f"ATTRIBUTE={burn_value}"])        
+        gdal.RasterizeLayer(mem_raster, [1], layer, options=[f"ATTRIBUTE={burn_value}"])
 
     # Rasterize all geometries with burn_value
     else:
@@ -1384,3 +1384,58 @@ def get_topo_zones(
         plt.show()
 
     return test_dem_rc_vec
+
+def group_layer_from_label(gdf, label_field, count_field="n_features"):
+    """
+    Aggregate features by label and create a GeoDataFrame of group centroids.
+
+    For each unique value of `label_field`, the function computes the centroid
+    of the grouped features as the mean of their geometry centroids and counts
+    the number of features in the group. The resulting groups are returned as
+    a GeoDataFrame with point geometries located at the group centroids.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Input GeoDataFrame containing the features to aggregate.
+
+    label_field : str
+        Name of the field containing the group labels.
+
+    count_field : str, default="n_features"
+        Name of the output field storing the number of features in each group.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        GeoDataFrame containing one point per group, with the following
+        attributes:
+        - `label_field`: group identifier;
+        - `count_field`: number of features in the group;
+        - point geometry representing the group centroid.
+    """
+
+    # Extract the centroids of all the features
+    centroids = gdf.geometry.centroid
+
+    # Aggregate the groups by the label, and associate one geometry per group from the centroid of all the centroids of a group
+    groups = (
+        gdf.assign(_x=centroids.x, _y=centroids.y)
+        .groupby(label_field)
+        .agg(
+            x=("_x", "mean"),
+            y=("_y", "mean"),
+            **{count_field: (label_field, "size")},
+        )
+        .reset_index()
+    )
+
+    # Re-transform it into a GeoDataFrame
+    groups = gpd.GeoDataFrame(
+        groups,
+        geometry=gpd.points_from_xy(groups.x, groups.y),
+        crs=gdf.crs,
+    )
+
+    groups = groups.drop(labels=['x', 'y'], axis=1)
+    return groups
