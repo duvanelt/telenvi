@@ -1524,7 +1524,17 @@ def get_zonal_sum_layer(target_raster, target_layer, valid_threshold=None, opera
     output_layer[fieldname] = output_layer.progress_apply(lambda row: get_zonal_sum_sample(target_raster, row, valid_threshold, operator, maskValue=maskValue), axis=1)
     return output_layer
 
-def get_zonal_stats_layer(target_raster, target_layer, valid_threshold=None, operator='>',  deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], fieldnames=None, maskValue=0):
+def get_zonal_stats_layer(
+    target_raster,
+    target_layer,
+    valid_threshold=None,
+    operator='>',
+    deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1],
+    fieldnames=None,
+    maskValue=0,
+    drop_existant_fields=False
+    ):
+
     """
     Extract zonal statistics on the target raster pixels for each sample of the vector target_layer.
     Return a new geodataframe with one field for each q.
@@ -1536,6 +1546,15 @@ def get_zonal_stats_layer(target_raster, target_layer, valid_threshold=None, ope
     else:
         if len(fieldnames) != len(deciles):
             raise ValueError('Fieldnames length must match deciles len')
+
+    # Check existence of the fields in the layer
+    if not drop_existant_fields:
+        for new_field in fieldnames:
+            if new_field in target_layer.columns:
+                fieldnames.remove(new_field)
+        if len(fieldnames) == 0:
+            print('all fields are already existing')
+            return target_layer
 
     # Processing
     tqdm.pandas()
