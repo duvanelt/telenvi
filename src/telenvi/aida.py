@@ -735,6 +735,14 @@ def explore_linear_relation(
     # -----------------------------
     # Visualization
     # -----------------------------
+
+    if not visualize_relation:
+        r2_val = r2_score(y_true, y_pred)
+        if get_score:
+            return model, df_out, r2_val
+        else:
+            return model, df_out
+
     if visualize_relation:
 
         if ax is None:
