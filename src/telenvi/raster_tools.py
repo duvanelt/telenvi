@@ -1532,12 +1532,14 @@ def get_zonal_stats_layer(
     deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1],
     fieldnames=None,
     maskValue=0,
-    drop_existant_fields=False
+    drop_existant_fields=False,
+    report = False
     ):
 
     """
     Extract zonal statistics on the target raster pixels for each sample of the vector target_layer.
     Return a new geodataframe with one field for each q.
+    If report = True, also returns the list of the created fields 
     """
 
     # Define output field names
@@ -1548,19 +1550,35 @@ def get_zonal_stats_layer(
             raise ValueError('Fieldnames length must match deciles len')
 
     # Check existence of the fields in the layer
+    fieldnames_already_existing = []
     if not drop_existant_fields:
+
+        # Recherche des champs existants
         for new_field in fieldnames:
             if new_field in target_layer.columns:
-                fieldnames.remove(new_field)
+                fieldnames_already_existing.append(new_field)
+
+        print('Already existing fields :')
+        print(fieldnames_already_existing)
+        # Fabrication d'une nouvelle liste en excluant les champs déjà calculés
+        fieldnames = [fn for fn in fieldnames if fn not in fieldnames_already_existing]
+
+        # Si la nouvelle liste est vide alors on ne calcule rien et retourne le layer comme il est entré
         if len(fieldnames) == 0:
             print('all fields are already existing')
-            return target_layer
+            if report:
+                return target_layer, fieldnames
+            else:
+                return target_layer
 
     # Processing
     tqdm.pandas()
     output_layer = target_layer.copy()
     output_layer[fieldnames] = output_layer.progress_apply(lambda row: get_zonal_stats_sample(target_raster, row, valid_threshold, operator, deciles, maskValue=maskValue), axis=1, result_type='expand')
-    return output_layer
+    if report:
+        return output_layer, fieldnames
+    else:
+        return output_layer
 
 def binary_geoims_get_part_of_geo_row_with_ones(geo_row, target_geoim, epsg=2056):
     """
