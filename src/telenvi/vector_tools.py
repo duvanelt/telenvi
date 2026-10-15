@@ -1439,3 +1439,65 @@ def group_layer_from_label(gdf, label_field, count_field="n_features"):
 
     groups = groups.drop(labels=['x', 'y'], axis=1)
     return groups
+
+def check_existing_fields(
+    target_layer,
+    fieldnames,
+    drop_existant_fields=False,
+    report=False
+    ):
+    """
+    Check whether the requested fields already exist in the target layer.
+
+    Parameters
+    ----------
+    target_layer : pandas.DataFrame or geopandas.GeoDataFrame
+        Layer in which fields are checked.
+    fieldnames : list of str
+        Names of the fields to check.
+    drop_existant_fields : bool, default=False
+        If True, keep all requested fields, even if they already exist.
+        If False, exclude fields that already exist in the layer.
+    report : bool, default=False
+        If True, return both the target layer and the filtered field list.
+        If False, return only the target layer.
+
+    Returns
+    -------
+    target_layer : same type as input
+        The original target layer.
+    fieldnames : list of str, optional
+        The fields to calculate, returned only when report=True.
+    """
+    fieldnames = list(fieldnames)
+
+    if not drop_existant_fields:
+        # Identify fields that already exist in the layer.
+        fieldnames_already_existing = [
+            fieldname
+            for fieldname in fieldnames
+            if fieldname in target_layer.columns
+        ]
+
+        print("Already existing fields:")
+        print(fieldnames_already_existing)
+
+        # Keep only fields that do not already exist.
+        fieldnames = [
+            fieldname
+            for fieldname in fieldnames
+            if fieldname not in fieldnames_already_existing
+        ]
+
+        # Return early if all requested fields already exist.
+        if len(fieldnames) == 0:
+            print("All fields already exist.")
+
+            if report:
+                return target_layer, fieldnames
+            return target_layer
+
+    if report:
+        return target_layer, fieldnames
+
+    return target_layer

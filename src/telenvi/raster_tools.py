@@ -1450,12 +1450,18 @@ def clip_many(targets, nRes=None):
 
     return targets
 
-def get_zonal_stats_sample(target_raster, target_zone, valid_threshold=None, operator='>', deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], maskValue=0, mode=None):
+def extract_pixel_values_sample(
+    target_raster, 
+    target_zone, 
+    valid_threshold=None,
+    operator='>', 
+    maskValue=0,
+    mode=None
+    ):
     """
-    Return min, first decile, first quantile, median, third quantile, ninth decile, max of the raster pixels within the target_zone
-    Qs can be arranged to set up the returned values differently
+    Extract a flatten array of the pixels of target_rasters spatially intersecting target_zone.
+    Valid_threshold and operator allows to handle some invalid data ranges. 
     """
-
     # First we crop the target raster on the target zone
     target_raster_cropped = Open(cropFromVector(target_raster, target_zone.geometry), load_pixels=True)
 
@@ -1472,6 +1478,27 @@ def get_zonal_stats_sample(target_raster, target_zone, valid_threshold=None, ope
             target_array_masked_flatten = target_array_masked_flatten[target_array_masked_flatten > valid_threshold]
         elif operator == '<':
             target_array_masked_flatten = target_array_masked_flatten[target_array_masked_flatten < valid_threshold]            
+
+    return target_array_masked_flatten
+
+def get_zonal_stats_sample(
+    target_raster,
+    target_zone,
+    valid_threshold=None,
+    operator='>',
+    deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], 
+    maskValue=0,
+    mode=None):
+    """
+    Return min, first decile, first quantile, median, third quantile, ninth decile, max of the raster pixels within the target_zone
+    Qs can be arranged to set up the returned values differently
+    Raise 
+        RuntimeError: Attempt to create 0x1 dataset is illegal,sizes must be larger than zero
+        When the sample geometry is smaller than a raster pixel 
+    """
+
+    # Get the pixels in the target zone
+    target_array_masked_flatten = extract_pixel_values_sample(target_raster, target_zone, valid_threshold=valid_threshold, operator=operator, maskValue=maskValue, mode=mode)
 
     # Ensure there is data to resume
     if len(target_array_masked_flatten) == 0:
@@ -1529,56 +1556,273 @@ def get_zonal_stats_layer(
     target_layer,
     valid_threshold=None,
     operator='>',
-    deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1],
+    deciles=None,
     fieldnames=None,
     maskValue=0,
     drop_existant_fields=False,
-    report = False
-    ):
-
+    report=False
+):
     """
-    Extract zonal statistics on the target raster pixels for each sample of the vector target_layer.
-    Return a new geodataframe with one field for each q.
-    If report = True, also returns the list of the created fields 
+    Extract zonal statistics from raster pixels for each feature in target_layer.
+
+    Computes the requested quantiles for each feature and stores them in
+    separate fields. Existing fields are skipped unless
+    drop_existant_fields=True.
+
+    Parameters
+    ----------
+    target_raster : rasterio.DatasetReader or str
+        Input raster dataset or raster path.
+    target_layer : geopandas.GeoDataFrame
+        Vector layer containing the features used for zonal statistics.
+    valid_threshold : float, optional
+        Threshold used to filter raster values.
+    operator : str, default='>'
+        Comparison operator applied to valid_threshold.
+    deciles : list of float, optional
+        Quantiles to calculate. Defaults to
+        [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1].
+    fieldnames : list of str, optional
+        Output field names, one per quantile. If None, names are
+        generated using the format 'raster_d{quantile}'.
+    maskValue : int or float, default=0
+        Raster value to mask, as handled by get_zonal_stats_sample.
+    drop_existant_fields : bool, default=False
+        If False, existing output fields are skipped.
+        If True, existing output fields are recalculated and overwritten.
+        This parameter does not delete existing fields.
+    report : bool, default=False
+        If True, return the output layer and the list of fields calculated.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Updated layer.
+    tuple
+        (output_layer, calculated_fields) if report=True.
     """
 
-    # Define output field names
+    # Define the requested quantiles.
+    if deciles is None:
+        deciles = [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]
+
+    # Define output field names.
     if fieldnames is None:
         fieldnames = [f"raster_d{d}" for d in deciles]
-    else:
-        if len(fieldnames) != len(deciles):
-            raise ValueError('Fieldnames length must match deciles len')
+    elif len(fieldnames) != len(deciles):
+        raise ValueError(
+            "Fieldnames length must match deciles length."
+        )
 
-    # Check existence of the fields in the layer
-    fieldnames_already_existing = []
-    if not drop_existant_fields:
+    # Preserve the correspondence between fields and quantiles.
+    field_quantile_pairs = list(zip(fieldnames, deciles))
 
-        # Recherche des champs existants
-        for new_field in fieldnames:
-            if new_field in target_layer.columns:
-                fieldnames_already_existing.append(new_field)
+    # Identify the fields that need to be calculated.
+    _, fields_to_calculate = vt.check_existing_fields(
+        target_layer=target_layer,
+        fieldnames=fieldnames,
+        drop_existant_fields=drop_existant_fields,
+        report=True
+    )
 
-        print('Already existing fields :')
-        print(fieldnames_already_existing)
-        # Fabrication d'une nouvelle liste en excluant les champs déjà calculés
-        fieldnames = [fn for fn in fieldnames if fn not in fieldnames_already_existing]
+    # Return early if every requested field already exists.
+    if not fields_to_calculate:
+        if report:
+            return target_layer, []
+        return target_layer
 
-        # Si la nouvelle liste est vide alors on ne calcule rien et retourne le layer comme il est entré
-        if len(fieldnames) == 0:
-            print('all fields are already existing')
-            if report:
-                return target_layer, fieldnames
-            else:
-                return target_layer
+    # Keep only the quantiles corresponding to fields to calculate.
+    quantiles_to_calculate = [
+        quantile
+        for field, quantile in field_quantile_pairs
+        if field in fields_to_calculate
+    ]
 
-    # Processing
+    # Process each feature.
     tqdm.pandas()
+
     output_layer = target_layer.copy()
-    output_layer[fieldnames] = output_layer.progress_apply(lambda row: get_zonal_stats_sample(target_raster, row, valid_threshold, operator, deciles, maskValue=maskValue), axis=1, result_type='expand')
+
+    output_layer[fields_to_calculate] = output_layer.progress_apply(
+        lambda row: get_zonal_stats_sample(
+            target_raster,
+            row,
+            valid_threshold,
+            operator,
+            quantiles_to_calculate,
+            maskValue=maskValue
+        ),
+        axis=1,
+        result_type='expand'
+    )
+
     if report:
-        return output_layer, fieldnames
-    else:
-        return output_layer
+        return output_layer, fields_to_calculate
+
+    return output_layer
+
+def get_main_orientation_sample(
+    target_aspect_degrees,
+    target_zone,
+    valid_threshold=0,
+    operator='>',
+    maskValue=-999,
+    mode=None
+):
+    """
+    Compute the main circular orientation and directional concentration
+    of aspect raster pixels within a given zone.
+
+    Parameters
+    ----------
+    target_aspect_degrees : rasterio.DatasetReader or str
+        Aspect raster with values expressed in degrees.
+    target_zone : geopandas.GeoSeries or dict
+        Polygon or feature defining the extraction zone.
+    valid_threshold : float, default=0
+        Threshold used to filter raster values.
+    operator : str, default='>'
+        Comparison operator applied to valid_threshold.
+    maskValue : int or float, default=-999
+        Raster value to exclude from the analysis.
+    mode : optional
+        Extraction mode passed to extract_pixel_values_sample.
+
+    Returns
+    -------
+    tuple of float
+        (main_orientation, R), where main_orientation is the circular
+        mean aspect in degrees and R is the mean resultant length,
+        measuring directional concentration.
+    """
+
+    aspects_deg = extract_pixel_values_sample(
+        target_raster=target_aspect_degrees,
+        target_zone=target_zone,
+        valid_threshold=valid_threshold,
+        operator=operator,
+        maskValue=maskValue,
+        mode=mode
+    )
+
+    main_orientation, r = aida.circular_mean_and_resultant(aspects_deg)
+
+    return main_orientation, r
+
+
+def get_main_orientation_layer(
+    target_aspect_degrees,
+    target_layer,
+    valid_threshold=0,
+    operator='>',
+    fieldnames=None,
+    maskValue=-999,
+    mode=None,
+    drop_existant_fields=False,
+    report=False
+):
+    """
+    Compute the main circular orientation and directional concentration
+    for each feature in a polygon layer.
+
+    Existing output fields are skipped unless drop_existant_fields=True.
+
+    Parameters
+    ----------
+    target_aspect : rasterio.DatasetReader or str
+        Aspect raster with values expressed in degrees.
+    target_layer : geopandas.GeoDataFrame
+        Polygon layer defining the extraction zones.
+    valid_threshold : float, default=0
+        Threshold used to filter raster values.
+    operator : str, default='>'
+        Comparison operator applied to valid_threshold.
+    fieldnames : list of str, optional
+        Output field names, in the order [orientation, concentration].
+        Defaults to ['main_asp', 'r'].
+    maskValue : int or float, default=-999
+        Raster value to exclude from the analysis.
+    mode : optional
+        Extraction mode passed to extract_pixel_values_sample.
+    drop_existant_fields : bool, default=False
+        If False, existing output fields are skipped.
+        If True, existing output fields are recalculated and overwritten.
+    report : bool, default=False
+        If True, return the output layer and the list of calculated fields.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Updated layer.
+    tuple
+        (output_layer, calculated_fields) if report=True.
+    """
+
+    # Define output field names.
+    if fieldnames is None:
+        fieldnames = ['main_asp', 'r']
+
+    if len(fieldnames) != 2:
+        raise ValueError(
+            "fieldnames must contain exactly two names: "
+            "one for the main orientation and one for R."
+        )
+
+    # Associate each field with its corresponding result.
+    field_result_pairs = [
+        (fieldnames[0], 0),  # Main orientation
+        (fieldnames[1], 1),  # Directional concentration R
+    ]
+
+    # Identify the fields that need to be calculated.
+    _, fields_to_calculate = vt.check_existing_fields(
+        target_layer=target_layer,
+        fieldnames=fieldnames,
+        drop_existant_fields=drop_existant_fields,
+        report=True
+    )
+
+    # Return early if all requested fields already exist.
+    if not fields_to_calculate:
+        if report:
+            return target_layer, []
+        return target_layer
+
+    # Identify which results correspond to the missing fields.
+    result_indices = [
+        index
+        for field, index in field_result_pairs
+        if field in fields_to_calculate
+    ]
+
+    # Process each feature.
+    tqdm.pandas()
+
+    output_layer = target_layer.copy()
+
+    def calculate_orientation(row):
+        return get_main_orientation_sample(
+            target_aspect_degrees=target_aspect_degrees,
+            target_zone=row,
+            valid_threshold=valid_threshold,
+            operator=operator,
+            maskValue=maskValue,
+            mode=mode
+        )
+
+    results = output_layer.progress_apply(
+        calculate_orientation,
+        axis=1
+    )
+
+    # Assign only the missing fields, preserving their correct result.
+    for field, index in zip(fields_to_calculate, result_indices):
+        output_layer[field] = results.apply(lambda result: result[index])
+
+    if report:
+        return output_layer, fields_to_calculate
+
+    return output_layer
 
 def binary_geoims_get_part_of_geo_row_with_ones(geo_row, target_geoim, epsg=2056):
     """
