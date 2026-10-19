@@ -168,6 +168,8 @@ def getMainAxes(polygon : shapely.Polygon | shapely.MultiPolygon):
     """
     Return 2 shapely.LineString objects, describing the major axes of the RGU extended outlines bounding box
     """
+    if polygon is None:
+        return None
     
      # Get the rotated rectangle of the Extended outline
     geobox = polygon.minimum_rotated_rectangle
@@ -190,6 +192,23 @@ def getMainAxes(polygon : shapely.Polygon | shapely.MultiPolygon):
     minor_axis = shapely.LineString([g,h])
 
     return major_axis, minor_axis
+
+def getMainAxesLength(polygon):
+    """
+    Return the lengths of the two main axes of the oriented bounding box of a polygon
+    """
+    axes = getMainAxes(polygon)
+
+    # Trie les pour avoir le plus grand devant
+    axes = sorted(
+        (axis for axis in axes if axis is not None),
+        key=lambda axis: axis.length,
+        reverse=True
+    )
+
+    len_max = axes[0].length
+    len_min = axes[-1].length
+    return (len_max, len_min)
 
 def getGeoPointsAlongGeoLine(geoLine, step):
     """
