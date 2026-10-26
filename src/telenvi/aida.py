@@ -18,6 +18,7 @@ from sklearn.metrics import r2_score
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import classification_report, confusion_matrix
 from scipy.ndimage import uniform_filter
+from scipy.stats import circmean, circstd
 
 # Visualisation libraries
 from matplotlib import pyplot as plt
@@ -1322,57 +1323,26 @@ def affect_random_color_to_labels(df, label_col='label', color_col='label_color'
     df[color_col] = df[label_col].map(color_map)
     return df
 
-def circular_mean_and_resultant(aspects_deg):
+def circular_mean_and_dispersion(aspects_deg):
     """
-    Compute the circular mean aspect and the mean resultant length.
-
-    The circular mean is calculated from the mean sine and cosine
-    components of the input angles. This approach correctly handles
-    angular wraparound (e.g., aspects of 350° and 10°).
+    Compute the circular mean direction and circular standard deviation.
 
     Parameters
     ----------
     aspects_deg : array-like
-        Aspect angles in degrees, expressed in a consistent angular
-        convention. Angles must represent directions on a circle.
+        Aspect angles in degrees, representing directions on a circle.
 
     Returns
     -------
     mean_angle : float
-        Circular mean aspect in degrees, normalized to [0, 360).
-        Returns NaN if the input contains no finite values or if the
-        mean direction is undefined because the resultant vector
-        has a negligible length.
+        Circular mean direction in degrees, normalized to [0, 360).
+        Returns NaN if no finite values are available.
 
-    R : float
-        Mean resultant length, ranging from 0 to 1, which measures
-        the concentration of the angular observations.
-        Values close to 1 indicate highly concentrated directions,
-        whereas values close to 0 indicate dispersed or opposing
-        directions. R is undefined (NaN) if there are no finite
-        input angles.
-
-    Notes
-    -----
-    The mean resultant length is defined as:
-
-        R = sqrt(C**2 + S**2)
-
-    where C and S are the mean cosine and sine components,
-    respectively.
-
-    The circular mean is computed as:
-
-        mean_angle = atan2(S, C)
-
-    This function implements the conventional vector-based circular
-    mean, not a circular median.
-
-    References
-    ----------
-    Jammalamadaka, S. R., & SenGupta, A. (2001).
-    Topics in Circular Statistics. World Scientific.
+    dispersion : float
+        Circular standard deviation in degrees.
+        Returns NaN if no finite values are available.
     """
+
     aspects_deg = np.asarray(aspects_deg, dtype=float)
 
     # Exclude NaN and infinite values.
@@ -1381,22 +1351,16 @@ def circular_mean_and_resultant(aspects_deg):
     if aspects_deg.size == 0:
         return np.nan, np.nan
 
-    # Convert angles from degrees to radians.
+    # Convert angles to radians.
     angles_rad = np.deg2rad(aspects_deg)
 
-    # Compute the mean cosine and sine components.
-    C = np.mean(np.cos(angles_rad))
-    S = np.mean(np.sin(angles_rad))
+    # Compute circular mean and circular standard deviation.
+    mean_angle = np.rad2deg(
+        circmean(angles_rad, low=0, high=2 * np.pi)
+    ) % 360
 
-    # Compute the mean resultant length (directional concentration).
-    R = np.hypot(C, S)
+    dispersion = np.rad2deg(
+        circstd(angles_rad, low=0, high=2 * np.pi)
+    )
 
-    # Compute the circular mean and normalize it to [0, 360).
-    mean_angle = np.rad2deg(np.arctan2(S, C)) % 360
-
-    # The mean direction is undefined when the resultant vector
-    # is effectively zero.
-    if R < 1e-10:
-        mean_angle = np.nan
-
-    return mean_angle, R
+    return mean_angle, dispersion

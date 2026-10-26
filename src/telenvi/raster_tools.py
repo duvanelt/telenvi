@@ -1705,7 +1705,7 @@ def get_main_orientation_sample(
         mode=mode
     )
 
-    main_orientation, r = aida.circular_mean_and_resultant(aspects_deg)
+    main_orientation, r = aida.circular_mean_and_dispersion(aspects_deg)
 
     return main_orientation, r
 
