@@ -19,6 +19,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import classification_report, confusion_matrix
 from scipy.ndimage import uniform_filter
 from scipy.stats import circmean, circstd
+from itertools import product
 
 # Visualisation libraries
 from matplotlib import pyplot as plt
@@ -1364,3 +1365,193 @@ def circular_mean_and_dispersion(aspects_deg):
     )
 
     return mean_angle, dispersion
+
+def compute_group_statistics(
+    df: pd.DataFrame,
+    group_vars: list[str],
+    value_var: str,
+    percentiles: list[float],
+) -> pd.DataFrame:
+    """
+    Compute descriptive statistics for each group.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input dataset.
+    group_vars : list[str]
+        Names of the variables defining the groups.
+    value_var : str
+        Name of the numerical variable to analyze.
+    percentiles : list[float]
+        Percentiles to compute, expressed as fractions between 0 and 1.
+        The median (0.5) is always included.
+
+    Returns
+    -------
+    pd.DataFrame
+        Descriptive statistics for each group, including count, mean,
+        standard deviation, minimum, maximum, and requested percentiles.
+    """
+    requested_percentiles = sorted(set(percentiles + [0.5]))
+
+    return df.groupby(group_vars)[value_var].describe(
+        percentiles=requested_percentiles
+    )
+
+def compute_group_percentile_spread(
+    statistics: pd.DataFrame,
+    group_vars: list[str],
+    group_values: tuple,
+    low_signature: str,
+    high_signature: str,
+) -> dict:
+    """
+    Compute percentile spread metrics for a single group.
+
+    Uses precomputed descriptive statistics to calculate the difference
+    between two percentiles and the deviation of each percentile from
+    the median.
+
+    Parameters
+    ----------
+    statistics : pd.DataFrame
+        Descriptive statistics indexed by the grouping variables, as
+        returned by compute_group_statistics().
+    group_vars : list[str]
+        Names of the variables defining the group.
+    group_values : tuple
+        Values identifying the group, in the same order as group_vars.
+    low_signature : str
+        Column name of the lower percentile (e.g. "10%").
+    high_signature : str
+        Column name of the upper percentile (e.g. "90%").
+
+    Returns
+    -------
+    dict
+        Group identifiers and computed metrics:
+        - id_comb: combined identifier for the group.
+        - diff: upper percentile minus lower percentile.
+        - <high_signature>_minus_median: upper percentile minus median.
+        - <low_signature>_minus_median: lower percentile minus median.
+        - median: group median, or NaN if the group is absent.
+
+        Missing groups receive zero for the spread metrics and NaN
+        for the median.
+
+    Raises
+    ------
+    ValueError
+        If the number of group values does not match the number of
+        grouping variables.
+    KeyError
+        If a required percentile column is missing.
+    """
+    if len(group_vars) != len(group_values):
+        raise ValueError(
+            "`group_values` must contain one value for each grouping variable."
+        )
+
+    result = dict(zip(group_vars, group_values))
+    result["id_comb"] = "_".join(map(str, group_values))
+
+    result.update({
+        "diff": 0,
+        f"{high_signature}_minus_median": 0,
+        f"{low_signature}_minus_median": 0,
+        "median": float("nan"),
+    })
+
+    try:
+        stats = statistics.loc[group_values]
+    except KeyError:
+        return result
+
+    low = stats[low_signature]
+    high = stats[high_signature]
+    median = stats["50%"]
+
+    result.update({
+        "diff": high - low,
+        f"{high_signature}_minus_median": high - median,
+        f"{low_signature}_minus_median": low - median,
+        "median": median,
+    })
+
+    return result
+
+def compute_group_spreads(
+    df: pd.DataFrame,
+    group_vars: list[str],
+    value_var: str,
+    group_orders: list[list],
+    low_percentile: float = 0.1,
+    high_percentile: float = 0.9,
+) -> pd.DataFrame:
+    """
+    Compute percentile spreads for all expected group combinations.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input dataset.
+    group_vars : list[str]
+        Names of the variables defining the groups.
+    value_var : str
+        Name of the numerical variable to analyze.
+    group_orders : list[list]
+        Expected values for each grouping variable, in the same order
+        as group_vars. All combinations are included in the result,
+        even if some groups are absent from the input dataset.
+    low_percentile : float, default=0.1
+        Lower percentile, expressed as a fraction between 0 and 1.
+    high_percentile : float, default=0.9
+        Upper percentile, expressed as a fraction between 0 and 1.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per expected group combination, with the group
+        identifiers, percentile spread, deviations from the median,
+        and median value.
+
+    Raises
+    ------
+    ValueError
+        If the percentile bounds are invalid or if the number of
+        group orders does not match the number of grouping variables.
+    """
+    if not 0 <= low_percentile < high_percentile <= 1:
+        raise ValueError(
+            "Percentiles must satisfy "
+            "0 <= low_percentile < high_percentile <= 1."
+        )
+
+    if len(group_vars) != len(group_orders):
+        raise ValueError(
+            "Each grouping variable must have a corresponding group order."
+        )
+
+    low_signature = f"{low_percentile * 100:g}%"
+    high_signature = f"{high_percentile * 100:g}%"
+
+    statistics = compute_group_statistics(
+        df=df,
+        group_vars=group_vars,
+        value_var=value_var,
+        percentiles=[low_percentile, high_percentile],
+    )
+
+    rows = [
+        compute_group_percentile_spread(
+            statistics=statistics,
+            group_vars=group_vars,
+            group_values=group_values,
+            low_signature=low_signature,
+            high_signature=high_signature,
+        )
+        for group_values in product(*group_orders)
+    ]
+
+    return pd.DataFrame(rows)
