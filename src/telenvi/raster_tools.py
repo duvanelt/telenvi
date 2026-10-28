@@ -1440,14 +1440,32 @@ def extract_pixel_values_sample(
     valid_threshold=None,
     operator='>', 
     maskValue=0,
-    mode=None
+    mode=None,
+    small_geoms_buffer_factor=None,
     ):
     """
     Extract a flatten array of the pixels of target_rasters spatially intersecting target_zone.
     Valid_threshold and operator allows to handle some invalid data ranges. 
     """
+    # Extract the raster pixel size
+    pixel_size = getPixelSize(target_raster)[0]
+
     # First we crop the target raster on the target zone
-    target_raster_cropped = Open(cropFromVector(target_raster, target_zone.geometry), load_pixels=True)
+    try:
+        target_raster_cropped = Open(cropFromVector(target_raster, target_zone.geometry), load_pixels=True)
+    except RuntimeError:
+        print('Runtme Stop')
+        print(target_zone.pm_pid)
+
+        # On met un buffer de la taille pixel * le buffer facteur autour du polygone problématique
+        # Et on rééssaie
+        if small_geoms_buffer_factor is not None :
+            buffered_geom = target_zone.geometry.buffer(pixel_size * small_geoms_buffer_factor)
+            target_raster_cropped = Open(cropFromVector(target_raster, buffered_geom), load_pixels=True)
+        
+        # Sinon, le polygone aura une valeur nan
+        else:
+            return [np.nan]
 
     # Now we set to maskValue the pixels outside of the zone
     target_raster_masked = target_raster_cropped.maskFromVector_v2(target_zone, maskValue=maskValue, mode=mode)
@@ -1472,7 +1490,9 @@ def get_zonal_stats_sample(
     operator='>',
     deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], 
     maskValue=0,
-    mode=None):
+    mode=None,
+    small_geoms_buffer_factor=None,
+    ):
     """
     Return min, first decile, first quantile, median, third quantile, ninth decile, max of the raster pixels within the target_zone
     Qs can be arranged to set up the returned values differently
@@ -1482,7 +1502,7 @@ def get_zonal_stats_sample(
     """
 
     # Get the pixels in the target zone
-    target_array_masked_flatten = extract_pixel_values_sample(target_raster, target_zone, valid_threshold=valid_threshold, operator=operator, maskValue=maskValue, mode=mode)
+    target_array_masked_flatten = extract_pixel_values_sample(target_raster, target_zone, valid_threshold=valid_threshold, operator=operator, maskValue=maskValue, mode=mode, small_geoms_buffer_factor=small_geoms_buffer_factor,)
 
     # Ensure there is data to resume
     if len(target_array_masked_flatten) == 0:
@@ -1544,7 +1564,8 @@ def get_zonal_stats_layer(
     fieldnames=None,
     maskValue=0,
     drop_existant_fields=False,
-    report=False
+    report=False,
+    small_geoms_buffer_factor=None,
 ):
     """
     Extract zonal statistics from raster pixels for each feature in target_layer.
@@ -1634,7 +1655,8 @@ def get_zonal_stats_layer(
             valid_threshold,
             operator,
             quantiles_to_calculate,
-            maskValue=maskValue
+            maskValue=maskValue,
+            small_geoms_buffer_factor=small_geoms_buffer_factor,
         ),
         axis=1,
         result_type='expand'
@@ -1651,7 +1673,8 @@ def get_main_orientation_sample(
     valid_threshold=0,
     operator='>',
     maskValue=-999,
-    mode=None
+    mode=None,
+    small_geoms_buffer_factor=None
 ):
     """
     Compute the main circular orientation and directional concentration
@@ -1686,13 +1709,13 @@ def get_main_orientation_sample(
         valid_threshold=valid_threshold,
         operator=operator,
         maskValue=maskValue,
-        mode=mode
+        mode=mode,
+        small_geoms_buffer_factor=small_geoms_buffer_factor,
     )
 
     main_orientation, r = aida.circular_mean_and_dispersion(aspects_deg)
 
     return main_orientation, r
-
 
 def get_main_orientation_layer(
     target_aspect_degrees,
@@ -1703,7 +1726,8 @@ def get_main_orientation_layer(
     maskValue=-999,
     mode=None,
     drop_existant_fields=False,
-    report=False
+    report=False,
+    small_geoms_buffer_factor=None,
 ):
     """
     Compute the main circular orientation and directional concentration
@@ -1791,7 +1815,8 @@ def get_main_orientation_layer(
             valid_threshold=valid_threshold,
             operator=operator,
             maskValue=maskValue,
-            mode=mode
+            mode=mode,
+            small_geoms_buffer_factor=small_geoms_buffer_factor,
         )
 
     results = output_layer.progress_apply(
