@@ -1152,46 +1152,30 @@ def getAspect(dem):
 
     return aspect
 
-def getCardinalArrayFromAspect(aspect):
+def get_cardi_pt(aspect_val):
     """
-    reclassify an aspect raster:
-    -1:no_data, 1:N, 2:NE, 3:E, 4:SE, 5:S, 6:SW, 7:W, 8:NW
-    N = >=337 or <22
-    NE = >= 22 or < 67
-    Etc...
+    Map an aspect angle in degrees to its compass direction.
+    'N':  (-22.5, 22.5),
+    'NE': (22.5, 67.5),
+    'E':  (67.5, 112.5),
+    'SE': (112.5, 157.5),
+    'S':  (157.5, 202.5),
+    'SW': (202.5, 247.5),
+    'W':  (247.5, 292.5),
+    'NW': (292.5, 337.5)
     """
-    # Load the data
-    if not type(aspect) == geoim.Geoim:
-        aspect = Open(aspect, load_pixels=True)
+    try:
+        aspect_val = float(aspect_val)
+    except (TypeError, ValueError):
+        return None
 
-    aspect_ar = aspect.array
+    if not pd.notna(aspect_val):
+        return None
 
-    # Define thresholds
-    conditions = [
-        (aspect_ar > 360)  | (aspect_ar < 0),
-        (aspect_ar >= 337) | (aspect_ar < 22),
-        (aspect_ar >= 22)  & (aspect_ar < 67),
-        (aspect_ar >= 67)  & (aspect_ar < 102),
-        (aspect_ar >= 102) & (aspect_ar < 157),
-        (aspect_ar >= 157) & (aspect_ar < 202),
-        (aspect_ar >= 202) & (aspect_ar < 247),
-        (aspect_ar >= 247) & (aspect_ar < 292),
-        (aspect_ar >= 292) & (aspect_ar < 337)
-        ]
+    directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+    idx = int(((aspect_val % 360 + 22.5) // 45) % 8)
 
-    # Define outputs values
-    categories = [-1, 1, 2, 3, 4, 5, 6, 7, 8]
-
-    # Process
-    cardi_array = np.select(conditions, categories, default=np.nan)
-
-    # Return
-    if type(aspect) == geoim.Geoim or str:
-        cardi = aspect.copy()
-        cardi.array = cardi_array
-        return cardi
-    else:
-        return cardi_array
+    return directions[idx]
 
 def getRastermap(target_dir_path, epsg=4326, extensions=['tif', 'jp2', 'hgt'], paths_to_avoid=[], account_for_subdirs = True):
     """
