@@ -1152,30 +1152,56 @@ def getAspect(dem):
 
     return aspect
 
-def get_cardi_pt(aspect_val):
+def get_cardi_pt(aspect_val, directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']):
     """
     Map an aspect angle in degrees to its compass direction.
-    'N':  (-22.5, 22.5),
-    'NE': (22.5, 67.5),
-    'E':  (67.5, 112.5),
-    'SE': (112.5, 157.5),
-    'S':  (157.5, 202.5),
-    'SW': (202.5, 247.5),
-    'W':  (247.5, 292.5),
-    'NW': (292.5, 337.5)
+    By default, the argument `directions` is set for cases where 0 is aligned to North. 
+
+    | Class | Min Aspect | Max Aspect |
+    | ----- | ---------- | ---------- |
+    | N     | -22.5      | 22.5       | or (337.5 ; 360) U (0 ; 22.5)
+    | NE    | 22.5       | 67.5       |
+    | E     | 67.5       | 112.5      |
+    | SE    | 112.5      | 157.5      |
+    | S     | 157.5      | 202.5      |
+    | SW    | 202.5      | 247.5      |
+    | W     | 247.5      | 292.5      |
+    | NW    | 292.5      | 337.5      |    
+    
     """
+
+    # Verify the numeric type of the input
     try:
         aspect_val = float(aspect_val)
     except (TypeError, ValueError):
         return None
 
+    # Verify the absence of Nan values
     if not pd.notna(aspect_val):
         return None
 
-    directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
-    idx = int(((aspect_val % 360 + 22.5) // 45) % 8)
+    # We normalize aspect between 0 and 360
+    normalized_aspect = aspect_val % 360
 
-    return directions[idx]
+    # Add 22.5 to set the "real" orientation sectors
+    # Either, North is like 0;45 and this is not what we want
+    # We want North = (0, 22.5) or (-22.5, 22.5)
+    shifted_aspect = normalized_aspect + 22.5
+
+    # Divide the angle by 45° to classify it 
+    # aspect_val = 0
+    sector_index = shifted_aspect // 45
+
+    # Renormalized between 0 and 7 to fit the index (Not 1-8 but 0-7)
+    sector_index = sector_index % 8
+
+    # Convert in int either we can't use it as index
+    idx = int(sector_index)
+
+    # Get the associated cardinal point
+    cardi_pt = directions[idx]
+
+    return cardi_pt
 
 def getRastermap(target_dir_path, epsg=4326, extensions=['tif', 'jp2', 'hgt'], paths_to_avoid=[], account_for_subdirs = True):
     """
@@ -1454,17 +1480,17 @@ def extract_pixel_values_sample(
     try:
         target_raster_cropped = Open(cropFromVector(target_raster, target_zone.geometry), load_pixels=True)
     except RuntimeError:
-        print('Runtme Stop')
-        print(target_zone.pm_pid)
 
         # On met un buffer de la taille pixel * le buffer facteur autour du polygone problématique
         # Et on rééssaie
         if small_geoms_buffer_factor is not None :
             buffered_geom = target_zone.geometry.buffer(pixel_size * small_geoms_buffer_factor)
             target_raster_cropped = Open(cropFromVector(target_raster, buffered_geom), load_pixels=True)
+            print(f'polygone augmenté de {pixel_size * small_geoms_buffer_factor}')
         
         # Sinon, le polygone aura une valeur nan
         else:
+            print('renvoie nan')
             return [np.nan]
 
     # Now we set to maskValue the pixels outside of the zone
